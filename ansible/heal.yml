@@ -1,0 +1,40 @@
+---
+- name: Self-healing remediation
+  hosts: local
+  gather_facts: false
+  vars:
+    alertname: unknown
+    nginx_container: nginx
+    stress_container: cpu-stress
+    verify_url: http://nginx:80
+  tasks:
+    - name: Show which alert triggered this run
+      ansible.builtin.debug:
+        msg: "Handling alert {{ alertname }}"
+
+    # --- NginxDown: restart the container, then prove it is serving again
+    - name: Restart the NGINX container
+      ansible.builtin.command: docker restart {{ nginx_container }}
+      changed_when: true
+      when: alertname == "NginxDown"
+
+    - name: Verify NGINX answers HTTP 200 again
+      ansible.builtin.uri:
+        url: "{{ verify_url }}"
+        status_code: 200
+      register: nginx_check
+      until: nginx_check is succeeded
+      retries: 10
+      delay: 2
+      when: alertname == "NginxDown"
+
+    # --- HighCpuUsage: stop the runaway container
+    - name: Stop the runaway CPU container
+      ansible.builtin.command: docker stop {{ stress_container }}
+      changed_when: true
+      when: alertname == "HighCpuUsage"
+
+    - name: No remediation defined
+      ansible.builtin.debug:
+        msg: "No playbook action for alert {{ alertname }}"
+      when: alertname not in ['NginxDown', 'HighCpuUsage']

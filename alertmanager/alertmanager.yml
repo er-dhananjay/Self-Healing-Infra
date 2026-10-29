@@ -1,0 +1,12 @@
+route:
+  receiver: healer
+  group_by: ["alertname"]
+  group_wait: 0s
+  group_interval: 10s
+  repeat_interval: 30s      # if still broken, the healer is triggered again
+
+receivers:
+  - name: healer
+    webhook_configs:
+      - url: http://healer:5001/alert
+        send_resolved: true

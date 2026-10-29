@@ -1,0 +1,58 @@
+# Self-healing infrastructure: Prometheus + Alertmanager + Ansible
+# Flow: nginx down -> Prometheus alert -> Alertmanager webhook -> healer runs Ansible -> nginx restarted
+services:
+  nginx:                      # the sample service we monitor and heal
+    image: nginx:1.27-alpine
+    container_name: nginx
+    ports:
+      - "8080:80"
+
+  blackbox:                   # probes nginx over HTTP (uptime check)
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: blackbox
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+
+  node-exporter:              # CPU metrics
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+    depends_on:
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      - healer
+
+  healer:                     # receives the webhook and runs the Ansible playbook
+    build:
+      context: .
+      dockerfile: healer/Dockerfile
+    container_name: healer
+    ports:
+      - "5001:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # lets Ansible restart containers
+      - ./logs:/logs
+
+  cpu-stress:                 # demo only: starts a runaway CPU load (docker compose --profile demo up -d cpu-stress)
+    image: alpine:3.20
+    container_name: cpu-stress
+    profiles: ["demo"]
+    stop_grace_period: 1s
+    command: ["sh", "-c", "for i in $$(seq $$(nproc)); do (while :; do :; done) & done; wait"]
